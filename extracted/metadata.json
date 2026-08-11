@@ -1,0 +1,6 @@
+{
+  "name": "Local Farmer - Organic Agriculture Platform",
+  "description": "Complete organic farming and local agriculture platform featuring eco services, fresh products shop, client reviews, and custom glassmorphism user authentication modal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
