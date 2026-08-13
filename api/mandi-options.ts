@@ -1,7 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { MOCK_MANDI_RECORDS } from './_data';
+import { MOCK_MANDI_RECORDS } from './_data.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   const states = Array.from(new Set(MOCK_MANDI_RECORDS.map(r => r.state))).sort();
   const commodities = Array.from(new Set(MOCK_MANDI_RECORDS.map(r => r.commodity))).sort();
 

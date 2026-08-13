@@ -1,7 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { DATA_GOV_API_KEY, GEMINI_API_KEY, MANDI_API_URL, fetchWithTimeout, MOCK_MANDI_RECORDS } from './_data';
+import { DATA_GOV_API_KEY, GEMINI_API_KEY, MANDI_API_URL, fetchWithTimeout, MOCK_MANDI_RECORDS } from './_data.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
