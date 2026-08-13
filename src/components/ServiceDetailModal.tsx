@@ -1,7 +1,48 @@
-import React, { useState } from 'react';
-import { X, CheckCircle2, Calendar, Send, Sparkles, Sprout, Search, TrendingUp, AlertTriangle, Calculator, FileText, PhoneCall, ShieldAlert, Check, Play, Video } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { X, CheckCircle2, Calendar, Send, Sparkles, Sprout, Search, TrendingUp, AlertTriangle, Calculator, FileText, PhoneCall, ShieldAlert, Check, Play, Video, MapPin, Loader2, Award, ChevronDown, ChevronUp, Zap, Target, Info } from 'lucide-react';
 import { ServiceItem } from '../types';
 import { IMAGES } from '../constants/data';
+
+// Fallback lists — will be replaced by dynamic fetch from /api/mandi-options
+const DEFAULT_STATES = [
+  'Andhra Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Gujarat',
+  'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+  'Madhya Pradesh', 'Maharashtra', 'Odisha', 'Punjab', 'Rajasthan',
+  'Tamil Nadu', 'Telangana', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+];
+
+const DEFAULT_CROPS = [
+  'Apple', 'Arhar', 'Bajra', 'Banana', 'Bengal Gram', 'Chilli', 'Cotton',
+  'Garlic', 'Green Peas', 'Groundnut', 'Jowar', 'Maize', 'Mango', 'Moong',
+  'Mustard', 'Onion', 'Paddy (Basmati)', 'Potato', 'Soyabean', 'Sugarcane',
+  'Tomato', 'Turmeric', 'Urad', 'Wheat',
+];
+
+// Type for mandi record from API
+interface MandiRecord {
+  id: number;
+  state: string;
+  district: string;
+  market: string;
+  commodity: string;
+  variety: string;
+  arrivalDate: string;
+  minPrice: number;
+  maxPrice: number;
+  modalPrice: number;
+  pricePerKg: string;
+  trend: string;
+}
+
+// Type for AI insights from API
+interface AiInsights {
+  recommendation: string;
+  recommendationLabel: string;
+  marketOverview: string;
+  priceSpread: string;
+  bestMandis: Array<{ name: string; location: string; expectedRate: string; reason: string }>;
+  actionableTips: string[];
+}
 
 interface ServiceDetailModalProps {
   service: ServiceItem | null;
@@ -18,15 +59,120 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
   const [farmSize, setFarmSize] = useState('10-50 acres');
 
   // Tool specific state
-  // Mandi Price state (Fast, instant zero-lag)
-  const [mandiSearch, setMandiSearch] = useState('');
+  // Mandi Price state — API-connected live search
+  const [mandiState, setMandiState] = useState('');
+  const [mandiCrop, setMandiCrop] = useState('');
   const [mandiQuintals, setMandiQuintals] = useState<number>(10);
+  const [mandiResults, setMandiResults] = useState<MandiRecord[]>([]);
+  const [mandiLoading, setMandiLoading] = useState(false);
+  const [mandiError, setMandiError] = useState('');
+  const [apiSource, setApiSource] = useState('');
+  const [aiInsights, setAiInsights] = useState<AiInsights | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(true);
+  const [bestPriceIndex, setBestPriceIndex] = useState(-1);
+
+  // Dynamic dropdown options fetched from /api/mandi-options
+  const [availableStates, setAvailableStates] = useState<string[]>(DEFAULT_STATES);
+  const [availableCrops, setAvailableCrops] = useState<string[]>(DEFAULT_CROPS);
+  const [stateCommodityMap, setStateCommodityMap] = useState<Record<string, string[]>>({});
+
+  // Fetch dynamic dropdown options on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/mandi-options');
+        const data = await res.json();
+        if (data.success) {
+          if (data.states?.length) setAvailableStates(data.states);
+          if (data.commodities?.length) setAvailableCrops(data.commodities);
+          if (data.stateCommodityMap) setStateCommodityMap(data.stateCommodityMap);
+        }
+      } catch {
+        // Silently fall back to defaults
+      }
+    })();
+  }, []);
+
+  // Crops filtered by selected state (if map available)
+  const cropsForState = mandiState && stateCommodityMap[mandiState]
+    ? stateCommodityMap[mandiState]
+    : availableCrops;
+
+  // Fetch mandi prices from backend API
+  const fetchMandiPrices = useCallback(async (state: string, crop: string) => {
+    setMandiLoading(true);
+    setMandiError('');
+    setMandiResults([]);
+    setBestPriceIndex(-1);
+    setAiInsights(null);
+
+    try {
+      const params = new URLSearchParams();
+      if (state) params.set('state', state);
+      if (crop) params.set('commodity', crop);
+      params.set('limit', '50');
+
+      const response = await fetch(`/api/mandi-prices?${params.toString()}`);
+      const data = await response.json();
+
+      if (data.success && data.records && data.records.length > 0) {
+        setMandiResults(data.records);
+        setApiSource(data.source || 'data.gov.in');
+
+        // Find best price (highest modal price)
+        let maxIdx = 0;
+        for (let i = 1; i < data.records.length; i++) {
+          if (data.records[i].modalPrice > data.records[maxIdx].modalPrice) {
+            maxIdx = i;
+          }
+        }
+        setBestPriceIndex(maxIdx);
+
+        // Fetch AI insights in background
+        fetchAiInsights(crop || data.records[0]?.commodity, state || data.records[0]?.state);
+      } else {
+        setMandiError('No mandi records found for this State & Crop combination. Try a different selection.');
+      }
+    } catch (err) {
+      setMandiError('Unable to connect to the Mandi price server. Please ensure the backend is running.');
+    } finally {
+      setMandiLoading(false);
+    }
+  }, []);
+
+  // Fetch AI market advisory
+  const fetchAiInsights = async (product: string, area: string) => {
+    setAiLoading(true);
+    try {
+      const response = await fetch('/api/ai-mandi-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product, area }),
+      });
+      const data = await response.json();
+      if (data.success && data.aiInsights) {
+        setAiInsights(data.aiInsights);
+      }
+    } catch {
+      // AI insights are optional — silently fail
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Auto-trigger search when both State and Crop are selected
+  useEffect(() => {
+    if (mandiState && mandiCrop) {
+      fetchMandiPrices(mandiState, mandiCrop);
+    }
+  }, [mandiState, mandiCrop, fetchMandiPrices]);
 
   // Profit Calculator state
   const [calcAcres, setCalcAcres] = useState<number>(5);
-  const [calcYield, setCalcYield] = useState<number>(20); // Quintal/Acre
-  const [calcPrice, setCalcPrice] = useState<number>(2400); // ₹/Quintal
-  const [calcCostPerAcre, setCalcCostPerAcre] = useState<number>(15000); // ₹/Acre
+  const [calcYield, setCalcYield] = useState<number>(20);
+  const [calcPrice, setCalcPrice] = useState<number>(2400);
+  const [calcCostPerAcre, setCalcCostPerAcre] = useState<number>(15000);
 
   // Disease Finder state
   const [selectedCrop, setSelectedCrop] = useState('Tomato');
@@ -38,6 +184,52 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
   // Emergency Alert SMS signup
   const [phoneAlert, setPhoneAlert] = useState('');
   const [alertSubmitted, setAlertSubmitted] = useState(false);
+
+  // Weather state for emergency-alerts
+  const [weatherState, setWeatherState] = useState('');
+  const [weatherCity, setWeatherCity] = useState('');
+  const [weatherData, setWeatherData] = useState<any>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState('');
+  const [weatherStates, setWeatherStates] = useState<string[]>([]);
+  const [weatherCityMap, setWeatherCityMap] = useState<Record<string, string[]>>({});
+
+  // Fetch weather city options on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/weather-cities');
+        const data = await res.json();
+        if (data.success) {
+          setWeatherStates(data.states || []);
+          setWeatherCityMap(data.stateCityMap || {});
+        }
+      } catch { /* fallback to empty */ }
+    })();
+  }, []);
+
+  // Auto-fetch weather when both state and city are selected
+  useEffect(() => {
+    if (!weatherState || !weatherCity) return;
+    (async () => {
+      setWeatherLoading(true);
+      setWeatherError('');
+      setWeatherData(null);
+      try {
+        const res = await fetch(`/api/weather?state=${encodeURIComponent(weatherState)}&city=${encodeURIComponent(weatherCity)}`);
+        const data = await res.json();
+        if (data.success) {
+          setWeatherData(data);
+        } else {
+          setWeatherError(data.error || 'Failed to fetch weather data.');
+        }
+      } catch {
+        setWeatherError('Unable to connect to weather server.');
+      } finally {
+        setWeatherLoading(false);
+      }
+    })();
+  }, [weatherState, weatherCity]);
 
   if (!service) return null;
 
@@ -51,83 +243,258 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
   };
 
   // Calculations for Profit Calculator
-  const totalProduction = calcAcres * calcYield; // Total Quintals
-  const totalRevenue = totalProduction * calcPrice; // Total ₹
-  const totalExpenses = calcAcres * calcCostPerAcre; // Total Cost ₹
-  const netProfit = totalRevenue - totalExpenses; // Net Profit ₹
-
-  // Fast Instant Mandi Market Rates Dataset
-  const mandiRates = [
-    { crop: 'Wheat (Gehun)', mandi: 'Karnal Central Mandi, Haryana', min: 2275, max: 2450, modal: 2380, trend: '+2.4%' },
-    { crop: 'Paddy Rice (Basmati 1121)', mandi: 'Amritsar Grain Market, Punjab', min: 3800, max: 4250, modal: 4120, trend: '+1.8%' },
-    { crop: 'Hybrid Tomato', mandi: 'Nashik Wholesale Yard, Maharashtra', min: 1400, max: 2150, modal: 1850, trend: '-3.2%' },
-    { crop: 'Red Onion (Pyaz)', mandi: 'Lasalgaon Mandi, Maharashtra', min: 1250, max: 1820, modal: 1580, trend: '-1.5%' },
-    { crop: 'Desi Cotton (Kapas)', mandi: 'Rajkot Cotton Yard, Gujarat', min: 6850, max: 7480, modal: 7250, trend: '+4.1%' },
-    { crop: 'Mustard (Sarson)', mandi: 'Jaipur Agriculture Hub, Rajasthan', min: 5150, max: 5680, modal: 5420, trend: '+0.9%' },
-    { crop: 'Potato (Kufri Jyoti)', mandi: 'Agra Mandi, Uttar Pradesh', min: 1100, max: 1520, modal: 1340, trend: '+1.2%' },
-    { crop: 'Yellow Soyabean', mandi: 'Indore Malwa Mandi, MP', min: 4400, max: 4890, modal: 4680, trend: '+2.1%' },
-    { crop: 'Royal Delicious Apple', mandi: 'Shimla Fruit Market, HP', min: 6500, max: 9200, modal: 7800, trend: '+3.5%' },
-  ].filter(m => m.crop.toLowerCase().includes(mandiSearch.toLowerCase()) || m.mandi.toLowerCase().includes(mandiSearch.toLowerCase()));
+  const totalProduction = calcAcres * calcYield;
+  const totalRevenue = totalProduction * calcPrice;
+  const totalExpenses = calcAcres * calcCostPerAcre;
+  const netProfit = totalRevenue - totalExpenses;
 
   // Render Tool Specific Content
   const renderInteractiveTool = () => {
     switch (service.id) {
       case 'mandi-price':
         return (
-          <div className="space-y-6">
-            <div className="bg-emerald-950/80 p-4 rounded-2xl border border-emerald-700/60">
-              <div className="flex flex-col sm:flex-row items-center gap-3">
-                <div className="relative flex-1 w-full">
-                  <Search className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    value={mandiSearch}
-                    onChange={(e) => setMandiSearch(e.target.value)}
-                    placeholder="Search crop or mandi (e.g. Wheat, Karnal, Cotton, Tomato)..."
-                    className="w-full bg-emerald-900/60 border border-emerald-700/60 rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
-                  />
+          <div className="space-y-5">
+            {/* State & Crop Selector */}
+            <div className="bg-emerald-950/80 p-4 rounded-2xl border border-emerald-700/60 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-emerald-300 mb-1.5 flex items-center space-x-1">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Select State</span>
+                  </label>
+                  <select
+                    value={mandiState}
+                    onChange={(e) => { setMandiState(e.target.value); setMandiCrop(''); }}
+                    className="w-full bg-emerald-900/60 border border-emerald-700/60 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 appearance-none cursor-pointer"
+                  >
+                    <option value="">— Choose Your State —</option>
+                    {availableStates.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex items-center space-x-2 w-full sm:w-auto shrink-0">
-                  <span className="text-xs text-emerald-200">Qty (Quintals):</span>
+                <div>
+                  <label className="block text-xs font-bold text-emerald-300 mb-1.5 flex items-center space-x-1">
+                    <Sprout className="w-3.5 h-3.5" />
+                    <span>Select Crop / Commodity</span>
+                  </label>
+                  <select
+                    value={mandiCrop}
+                    onChange={(e) => setMandiCrop(e.target.value)}
+                    className="w-full bg-emerald-900/60 border border-emerald-700/60 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 appearance-none cursor-pointer"
+                  >
+                    <option value="">— Choose Crop —</option>
+                    {cropsForState.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Quantity Selector */}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-emerald-200 font-semibold">Qty for value estimation:</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs text-emerald-400">Quintals:</span>
                   <input
                     type="number"
                     value={mandiQuintals}
                     onChange={(e) => setMandiQuintals(Math.max(1, Number(e.target.value)))}
-                    className="w-20 bg-emerald-900/60 border border-emerald-700/60 rounded-xl px-3 py-2 text-sm text-amber-300 font-bold text-center focus:outline-none"
+                    className="w-20 bg-emerald-900/60 border border-emerald-700/60 rounded-xl px-3 py-1.5 text-sm text-amber-300 font-bold text-center focus:outline-none"
                   />
                 </div>
               </div>
+
+              {/* Auto-trigger hint */}
+              {(!mandiState || !mandiCrop) && (
+                <p className="text-xs text-emerald-400/70 text-center italic flex items-center justify-center space-x-1">
+                  <Info className="w-3 h-3" />
+                  <span>Select both State and Crop to auto-fetch live mandi prices</span>
+                </p>
+              )}
             </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-emerald-800/60 bg-emerald-950/40">
-              <table className="w-full text-left text-xs sm:text-sm text-slate-200">
-                <thead className="bg-emerald-900/80 text-emerald-300 uppercase text-[11px] tracking-wider">
-                  <tr>
-                    <th className="p-3">Commodity</th>
-                    <th className="p-3">Mandi Location</th>
-                    <th className="p-3">Modal Rate (₹/Qtl)</th>
-                    <th className="p-3">Est. Value ({mandiQuintals} Qtl)</th>
-                    <th className="p-3">24h Trend</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-emerald-900/60">
-                  {mandiRates.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-emerald-900/40 transition">
-                      <td className="p-3 font-bold text-white">{item.crop}</td>
-                      <td className="p-3 text-slate-300">{item.mandi}</td>
-                      <td className="p-3 font-extrabold text-amber-300">₹{item.modal.toLocaleString()}</td>
-                      <td className="p-3 font-extrabold text-[#82c419]">₹{(item.modal * mandiQuintals).toLocaleString()}</td>
-                      <td className={`p-3 font-bold ${item.trend.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {item.trend}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-slate-400 text-center">
-              * Rates synced live with National Agriculture Market API. Verified daily at 08:00 AM.
-            </p>
+            {/* Loading Spinner */}
+            {mandiLoading && (
+              <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+                <p className="text-sm text-emerald-200 animate-pulse">Fetching live mandi rates from data.gov.in...</p>
+              </div>
+            )}
+
+            {/* Error State */}
+            {mandiError && !mandiLoading && (
+              <div className="p-4 bg-rose-950/50 rounded-2xl border border-rose-700/50 text-center space-y-2">
+                <AlertTriangle className="w-6 h-6 text-rose-400 mx-auto" />
+                <p className="text-sm text-rose-200">{mandiError}</p>
+              </div>
+            )}
+
+            {/* Results Table */}
+            {mandiResults.length > 0 && !mandiLoading && (
+              <>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-emerald-300 font-semibold">
+                    {mandiResults.length} market{mandiResults.length > 1 ? 's' : ''} found — {mandiState} · {mandiCrop}
+                  </span>
+                  <span className="text-slate-400 truncate ml-2">Source: {apiSource}</span>
+                </div>
+
+                <div className="overflow-x-auto rounded-2xl border border-emerald-800/60 bg-emerald-950/40">
+                  <table className="w-full text-left text-xs sm:text-sm text-slate-200">
+                    <thead className="bg-emerald-900/80 text-emerald-300 uppercase text-[11px] tracking-wider">
+                      <tr>
+                        <th className="p-3">Commodity</th>
+                        <th className="p-3">Mandi / Market</th>
+                        <th className="p-3">District</th>
+                        <th className="p-3">Min ₹</th>
+                        <th className="p-3">Max ₹</th>
+                        <th className="p-3">Modal ₹/Qtl</th>
+                        <th className="p-3">Est. Value ({mandiQuintals} Qtl)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-emerald-900/60">
+                      {mandiResults.map((item, idx) => (
+                        <tr
+                          key={item.id}
+                          className={`transition ${
+                            idx === bestPriceIndex
+                              ? 'bg-amber-900/30 border-l-4 border-l-amber-400'
+                              : 'hover:bg-emerald-900/40'
+                          }`}
+                        >
+                          <td className="p-3 font-bold text-white">
+                            <div className="flex items-center space-x-1.5">
+                              {idx === bestPriceIndex && (
+                                <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 bg-amber-400/20 border border-amber-400/40 rounded-full text-[10px] text-amber-300 font-bold shrink-0">
+                                  <Award className="w-3 h-3" />
+                                  <span>Best</span>
+                                </span>
+                              )}
+                              <span>{item.commodity}</span>
+                            </div>
+                            {item.variety !== 'Standard' && (
+                              <span className="text-[10px] text-slate-400 block">{item.variety}</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-300">{item.market}</td>
+                          <td className="p-3 text-slate-400">{item.district}</td>
+                          <td className="p-3 text-slate-300">₹{item.minPrice.toLocaleString()}</td>
+                          <td className="p-3 text-slate-300">₹{item.maxPrice.toLocaleString()}</td>
+                          <td className="p-3 font-extrabold text-amber-300">₹{item.modalPrice.toLocaleString()}</td>
+                          <td className="p-3 font-extrabold text-[#82c419]">₹{(item.modalPrice * mandiQuintals).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Best Price Highlight Card */}
+                {bestPriceIndex >= 0 && mandiResults[bestPriceIndex] && (
+                  <div className="p-4 bg-gradient-to-r from-amber-950/60 to-emerald-950/60 rounded-2xl border border-amber-500/40 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <Award className="w-6 h-6 text-amber-400" />
+                      <span className="text-sm font-bold text-amber-300">Best Price Found</span>
+                    </div>
+                    <div className="flex-1 text-sm text-white">
+                      <strong className="text-amber-200">{mandiResults[bestPriceIndex].market}</strong>, {mandiResults[bestPriceIndex].district} —
+                      <span className="text-[#82c419] font-extrabold ml-1">₹{mandiResults[bestPriceIndex].modalPrice.toLocaleString()}/Qtl</span>
+                      <span className="text-slate-400 ml-2 text-xs">
+                        (₹{(mandiResults[bestPriceIndex].modalPrice * mandiQuintals).toLocaleString()} for {mandiQuintals} Qtl)
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Market Intelligence Panel */}
+                <div className="rounded-2xl border border-emerald-700/50 overflow-hidden">
+                  <button
+                    onClick={() => setShowAiPanel(!showAiPanel)}
+                    className="w-full flex items-center justify-between p-3 bg-emerald-900/60 hover:bg-emerald-900/80 transition text-left"
+                  >
+                    <span className="flex items-center space-x-2 text-sm font-bold text-emerald-200">
+                      <Zap className="w-4 h-4 text-amber-400" />
+                      <span>AI Market Intelligence</span>
+                      {aiLoading && <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin ml-1" />}
+                    </span>
+                    {showAiPanel ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                  </button>
+
+                  {showAiPanel && aiInsights && (
+                    <div className="p-4 space-y-4 bg-emerald-950/50">
+                      {/* Recommendation Badge */}
+                      <div className="flex items-center space-x-3">
+                        <span className={`px-3 py-1.5 rounded-full text-xs font-bold border ${
+                          aiInsights.recommendation === 'SELL_TODAY'
+                            ? 'bg-emerald-900/80 text-[#82c419] border-emerald-500/50'
+                            : aiInsights.recommendation === 'HOLD_48_HOURS'
+                            ? 'bg-amber-900/80 text-amber-300 border-amber-500/50'
+                            : 'bg-sky-900/80 text-sky-300 border-sky-500/50'
+                        }`}>
+                          {aiInsights.recommendation === 'SELL_TODAY' ? '🟢 SELL TODAY' :
+                           aiInsights.recommendation === 'HOLD_48_HOURS' ? '🟡 HOLD 48 HRS' :
+                           '🔵 EXPLORE MANDIS'}
+                        </span>
+                        <span className="text-sm font-semibold text-white">{aiInsights.recommendationLabel}</span>
+                      </div>
+
+                      {/* Market Overview */}
+                      <p className="text-xs text-slate-300 leading-relaxed">{aiInsights.marketOverview}</p>
+
+                      {/* Price Spread */}
+                      {aiInsights.priceSpread && (
+                        <p className="text-xs text-emerald-300/80 italic">{aiInsights.priceSpread}</p>
+                      )}
+
+                      {/* Best Mandis */}
+                      {aiInsights.bestMandis && aiInsights.bestMandis.length > 0 && (
+                        <div className="space-y-2">
+                          <h6 className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center space-x-1">
+                            <Target className="w-3 h-3" />
+                            <span>Recommended Mandis</span>
+                          </h6>
+                          {aiInsights.bestMandis.map((m, i) => (
+                            <div key={i} className="flex items-start space-x-2 p-2.5 bg-emerald-900/40 rounded-xl border border-emerald-800/40">
+                              <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                              <div className="text-xs">
+                                <span className="font-bold text-white">{m.name}</span>
+                                <span className="text-slate-400 ml-1">({m.location})</span>
+                                <span className="text-amber-300 font-bold ml-2">{m.expectedRate}</span>
+                                <p className="text-slate-400 mt-0.5">{m.reason}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Actionable Tips */}
+                      {aiInsights.actionableTips && aiInsights.actionableTips.length > 0 && (
+                        <div className="space-y-1.5">
+                          <h6 className="text-xs font-bold text-emerald-300 uppercase tracking-wider">💡 Actionable Tips</h6>
+                          {aiInsights.actionableTips.map((tip, i) => (
+                            <div key={i} className="flex items-start space-x-2 text-xs text-slate-300">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-[#82c419] shrink-0 mt-0.5" />
+                              <span>{tip}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {showAiPanel && aiLoading && !aiInsights && (
+                    <div className="p-6 flex items-center justify-center space-x-2 bg-emerald-950/50">
+                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                      <span className="text-xs text-emerald-300">Analyzing market with Gemini AI...</span>
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-400 text-center">
+                  * Rates synced with data.gov.in National Agriculture Market API. Last updated: {mandiResults[0]?.arrivalDate || 'Today'}
+                </p>
+              </>
+            )}
           </div>
         );
 
@@ -465,29 +832,147 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
       case 'emergency-alerts':
         return (
           <div className="space-y-4">
-            <div className="p-4 bg-rose-950/60 rounded-2xl border border-rose-600/60 space-y-1">
-              <div className="flex items-center justify-between text-xs font-bold text-rose-300">
-                <span className="flex items-center space-x-1">
-                  <ShieldAlert className="w-4 h-4 text-rose-400" />
-                  <span>HIGH ALERT — WEATHER WARNING</span>
-                </span>
-                <span>Active 24 Hours</span>
+            {/* State & City Selector */}
+            <div className="bg-emerald-950/80 p-4 rounded-2xl border border-emerald-700/60 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-emerald-300 mb-1.5 flex items-center space-x-1">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Select State</span>
+                  </label>
+                  <select
+                    value={weatherState}
+                    onChange={(e) => { setWeatherState(e.target.value); setWeatherCity(''); }}
+                    className="w-full bg-emerald-900/60 border border-emerald-700/60 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 appearance-none cursor-pointer"
+                  >
+                    <option value="">— Choose State —</option>
+                    {weatherStates.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-emerald-300 mb-1.5 flex items-center space-x-1">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Select City</span>
+                  </label>
+                  <select
+                    value={weatherCity}
+                    onChange={(e) => setWeatherCity(e.target.value)}
+                    className="w-full bg-emerald-900/60 border border-emerald-700/60 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 appearance-none cursor-pointer"
+                    disabled={!weatherState}
+                  >
+                    <option value="">{weatherState ? '— Choose City —' : '— Select State First —'}</option>
+                    {(weatherCityMap[weatherState] || []).map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <h5 className="text-sm font-bold text-white">Unseasonal Heavy Rain & Hailstorm Forecast</h5>
-              <p className="text-xs text-rose-200/90">Keep harvested grains under tarpaulin. Delay fertilizer top-dressing in standing crops.</p>
+              {(!weatherState || !weatherCity) && (
+                <p className="text-xs text-emerald-400/70 text-center italic flex items-center justify-center space-x-1">
+                  <Info className="w-3 h-3" />
+                  <span>Select State and City to see live weather & farming alerts</span>
+                </p>
+              )}
             </div>
 
-            <div className="p-4 bg-amber-950/60 rounded-2xl border border-amber-600/60 space-y-1">
-              <div className="flex items-center justify-between text-xs font-bold text-amber-300">
-                <span className="flex items-center space-x-1">
-                  <AlertTriangle className="w-4 h-4 text-amber-400" />
-                  <span>MEDIUM ALERT — PEST OUTBREAK</span>
-                </span>
-                <span>Regional Alert</span>
+            {/* Loading */}
+            {weatherLoading && (
+              <div className="flex flex-col items-center justify-center py-8 space-y-3">
+                <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+                <p className="text-sm text-emerald-200 animate-pulse">Fetching live weather from Open-Meteo...</p>
               </div>
-              <h5 className="text-sm font-bold text-white">Pink Bollworm Threat in Cotton Belts</h5>
-              <p className="text-xs text-amber-200/90">Install pheromone traps immediately (5 traps/acre) to monitor adult moth activity.</p>
-            </div>
+            )}
+
+            {/* Error */}
+            {weatherError && !weatherLoading && (
+              <div className="p-4 bg-rose-950/50 rounded-2xl border border-rose-700/50 text-center space-y-2">
+                <AlertTriangle className="w-6 h-6 text-rose-400 mx-auto" />
+                <p className="text-sm text-rose-200">{weatherError}</p>
+              </div>
+            )}
+
+            {/* Weather Data Display */}
+            {weatherData && !weatherLoading && (
+              <>
+                {/* Current Weather Card */}
+                <div className="p-4 bg-emerald-950/60 rounded-2xl border border-emerald-800/60">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <span className="text-xs text-emerald-300 font-bold uppercase tracking-wider">
+                        {weatherCity}, {weatherState} — Live Weather
+                      </span>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <span className="text-3xl">{weatherData.current.weatherIcon}</span>
+                        <span className="text-3xl font-black text-white">{weatherData.current.temperature}°C</span>
+                        <span className="text-sm text-slate-300 ml-2">{weatherData.current.weatherDesc}</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-slate-400">{weatherData.source}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                    <div className="bg-emerald-900/50 p-2 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block">Feels Like</span>
+                      <span className="text-sm font-bold text-amber-300">{weatherData.current.feelsLike}°C</span>
+                    </div>
+                    <div className="bg-emerald-900/50 p-2 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block">Humidity</span>
+                      <span className="text-sm font-bold text-sky-300">{weatherData.current.humidity}%</span>
+                    </div>
+                    <div className="bg-emerald-900/50 p-2 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block">Wind</span>
+                      <span className="text-sm font-bold text-emerald-300">{weatherData.current.windSpeed} km/h</span>
+                    </div>
+                    <div className="bg-emerald-900/50 p-2 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block">Rain</span>
+                      <span className="text-sm font-bold text-sky-400">{weatherData.current.rain} mm</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3-Day Forecast */}
+                {weatherData.forecast && weatherData.forecast.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {weatherData.forecast.map((day: any, i: number) => (
+                      <div key={i} className="p-3 bg-emerald-950/60 rounded-2xl border border-emerald-800/40 text-center space-y-1">
+                        <span className="text-[10px] text-emerald-300 font-bold uppercase">{day.date}</span>
+                        <div className="text-xl">{day.weatherIcon}</div>
+                        <div className="text-xs text-white font-bold">{day.maxTemp}° / {day.minTemp}°</div>
+                        <div className="text-[10px] text-slate-400">{day.precipitation} mm rain</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Farm Alerts Based on Weather */}
+                {weatherData.farmAlerts && weatherData.farmAlerts.map((alert: any, i: number) => (
+                  <div key={i} className={`p-4 rounded-2xl border space-y-1 ${
+                    alert.level === 'HIGH'
+                      ? 'bg-rose-950/60 border-rose-600/60'
+                      : alert.level === 'MEDIUM'
+                      ? 'bg-amber-950/60 border-amber-600/60'
+                      : 'bg-emerald-950/60 border-emerald-600/60'
+                  }`}>
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className={`flex items-center space-x-1 ${
+                        alert.level === 'HIGH' ? 'text-rose-300' : alert.level === 'MEDIUM' ? 'text-amber-300' : 'text-emerald-300'
+                      }`}>
+                        {alert.level === 'HIGH' ? <ShieldAlert className="w-4 h-4 text-rose-400" /> : alert.level === 'MEDIUM' ? <AlertTriangle className="w-4 h-4 text-amber-400" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                        <span>{alert.level} ALERT — {alert.type.replace(/_/g, ' ')}</span>
+                      </span>
+                      <span className={alert.level === 'HIGH' ? 'text-rose-300' : alert.level === 'MEDIUM' ? 'text-amber-300' : 'text-emerald-300'}>
+                        {alert.level === 'LOW' ? 'All Clear' : 'Active Now'}
+                      </span>
+                    </div>
+                    <h5 className="text-sm font-bold text-white">{alert.title}</h5>
+                    <p className={`text-xs ${
+                      alert.level === 'HIGH' ? 'text-rose-200/90' : alert.level === 'MEDIUM' ? 'text-amber-200/90' : 'text-emerald-200/90'
+                    }`}>{alert.advice}</p>
+                  </div>
+                ))}
+              </>
+            )}
 
             {/* Instant SMS Alert Signup */}
             <div className="p-4 bg-emerald-950/80 rounded-2xl border border-emerald-800 space-y-2">
