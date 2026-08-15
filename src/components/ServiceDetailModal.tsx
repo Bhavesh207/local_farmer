@@ -168,11 +168,17 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
     }
   }, [mandiState, mandiCrop, fetchMandiPrices]);
 
-  // Profit Calculator state
-  const [calcAcres, setCalcAcres] = useState<number>(5);
+  // Profit Calculator state (Direct Numerical Calculator)
+  const [calcArea, setCalcArea] = useState<number>(5);
+  const [calcAreaUnit, setCalcAreaUnit] = useState<string>('Acres');
   const [calcYield, setCalcYield] = useState<number>(20);
+  const [calcYieldUnit, setCalcYieldUnit] = useState<string>('Quintals');
   const [calcPrice, setCalcPrice] = useState<number>(2400);
-  const [calcCostPerAcre, setCalcCostPerAcre] = useState<number>(15000);
+  const [calcPriceUnit, setCalcPriceUnit] = useState<string>('₹ / Quintal');
+  const [calcLabourCost, setCalcLabourCost] = useState<number>(5000);
+  const [calcMaterialCost, setCalcMaterialCost] = useState<number>(6000);
+  const [calcOtherCost, setCalcOtherCost] = useState<number>(2000);
+  const [calcCostScope, setCalcCostScope] = useState<'per-unit' | 'total'>('per-unit');
 
   // Disease Finder state
   const [selectedCrop, setSelectedCrop] = useState('Tomato');
@@ -242,11 +248,7 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
     }, 2000);
   };
 
-  // Calculations for Profit Calculator
-  const totalProduction = calcAcres * calcYield;
-  const totalRevenue = totalProduction * calcPrice;
-  const totalExpenses = calcAcres * calcCostPerAcre;
-  const netProfit = totalRevenue - totalExpenses;
+
 
   // Render Tool Specific Content
   const renderInteractiveTool = () => {
@@ -655,89 +657,389 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
           </div>
         );
 
-      case 'profit-calculator':
+      case 'profit-calculator': {
+        // Yield & Price normalization for calculations
+        // Default units: Land (Acres), Yield (Quintals/unit), Price (₹/Quintal)
+        const areaVal = Number(calcArea) || 0;
+        const yieldVal = Number(calcYield) || 0;
+        const priceVal = Number(calcPrice) || 0;
+        const labourVal = Number(calcLabourCost) || 0;
+        const materialVal = Number(calcMaterialCost) || 0;
+        const otherVal = Number(calcOtherCost) || 0;
+
+        // Yield multiplier to quintals
+        const yieldInQtlPerUnit = calcYieldUnit === 'Kg' ? yieldVal / 100 : calcYieldUnit === 'Bags (50kg)' ? yieldVal * 0.5 : yieldVal;
+        
+        // Price per quintal
+        const pricePerQtl = calcPriceUnit === '₹ / Kg' ? priceVal * 100 : priceVal;
+
+        // Total Production in Quintals
+        const totalProductionQtl = areaVal * yieldInQtlPerUnit;
+
+        // Total Revenue
+        const totalRevenue = Math.round(totalProductionQtl * pricePerQtl);
+
+        // Expense calculations (scope: per-unit vs total)
+        const totalLabour = calcCostScope === 'per-unit' ? Math.round(labourVal * areaVal) : labourVal;
+        const totalMaterial = calcCostScope === 'per-unit' ? Math.round(materialVal * areaVal) : materialVal;
+        const totalOther = calcCostScope === 'per-unit' ? Math.round(otherVal * areaVal) : otherVal;
+        const totalExpenses = totalLabour + totalMaterial + totalOther;
+
+        // Net Profit & Metrics
+        const netProfit = totalRevenue - totalExpenses;
+        const roi = totalExpenses > 0 ? ((netProfit / totalExpenses) * 100) : 0;
+        const profitPerLandUnit = areaVal > 0 ? Math.round(netProfit / areaVal) : 0;
+        const costPerLandUnit = areaVal > 0 ? Math.round(totalExpenses / areaVal) : 0;
+        const breakEvenPrice = totalProductionQtl > 0 ? Math.round(totalExpenses / totalProductionQtl) : 0;
+        const breakEvenYield = (areaVal > 0 && pricePerQtl > 0) ? (totalExpenses / (areaVal * pricePerQtl)) : 0;
+        const isProfitable = netProfit >= 0;
+        const revenueShare = totalRevenue > 0 ? Math.min(100, Math.max(0, Math.round((totalExpenses / totalRevenue) * 100))) : 50;
+
+        const applyPreset = (cropName: string) => {
+          if (cropName === 'wheat') {
+            setCalcArea(5);
+            setCalcAreaUnit('Acres');
+            setCalcYield(20);
+            setCalcYieldUnit('Quintals');
+            setCalcPrice(2400);
+            setCalcPriceUnit('₹ / Quintal');
+            setCalcLabourCost(4500);
+            setCalcMaterialCost(5500);
+            setCalcOtherCost(2000);
+            setCalcCostScope('per-unit');
+          } else if (cropName === 'paddy') {
+            setCalcArea(4);
+            setCalcAreaUnit('Acres');
+            setCalcYield(25);
+            setCalcYieldUnit('Quintals');
+            setCalcPrice(3800);
+            setCalcPriceUnit('₹ / Quintal');
+            setCalcLabourCost(7000);
+            setCalcMaterialCost(8000);
+            setCalcOtherCost(3000);
+            setCalcCostScope('per-unit');
+          } else if (cropName === 'tomato') {
+            setCalcArea(2);
+            setCalcAreaUnit('Acres');
+            setCalcYield(150);
+            setCalcYieldUnit('Quintals');
+            setCalcPrice(1800);
+            setCalcPriceUnit('₹ / Quintal');
+            setCalcLabourCost(18000);
+            setCalcMaterialCost(22000);
+            setCalcOtherCost(8000);
+            setCalcCostScope('per-unit');
+          }
+        };
+
         return (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-emerald-950/80 p-4 rounded-2xl border border-emerald-700/60">
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1 text-emerald-200">
-                  <span>Farm Land Area:</span>
-                  <span className="text-amber-300">{calcAcres} Acres</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="50"
-                  value={calcAcres}
-                  onChange={(e) => setCalcAcres(Number(e.target.value))}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1 text-emerald-200">
-                  <span>Expected Yield / Acre:</span>
-                  <span className="text-amber-300">{calcYield} Quintals</span>
-                </div>
-                <input
-                  type="range"
-                  min="5"
-                  max="60"
-                  value={calcYield}
-                  onChange={(e) => setCalcYield(Number(e.target.value))}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1 text-emerald-200">
-                  <span>Expected Mandi Rate:</span>
-                  <span className="text-amber-300">₹{calcPrice} / Qtl</span>
-                </div>
-                <input
-                  type="range"
-                  min="1000"
-                  max="10000"
-                  step="100"
-                  value={calcPrice}
-                  onChange={(e) => setCalcPrice(Number(e.target.value))}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1 text-emerald-200">
-                  <span>Input & Labor Cost / Acre:</span>
-                  <span className="text-amber-300">₹{calcCostPerAcre} / Acre</span>
-                </div>
-                <input
-                  type="range"
-                  min="5000"
-                  max="50000"
-                  step="1000"
-                  value={calcCostPerAcre}
-                  onChange={(e) => setCalcCostPerAcre(Number(e.target.value))}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
+          <div className="space-y-4">
+            {/* Quick Presets Bar */}
+            <div className="flex items-center justify-between bg-emerald-950/70 p-2.5 rounded-xl border border-emerald-800/60">
+              <span className="text-[11px] font-bold text-amber-300 flex items-center space-x-1">
+                <span>⚡ Quick Presets:</span>
+              </span>
+              <div className="flex gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => applyPreset('wheat')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 rounded-lg border border-emerald-700/60 transition"
+                >
+                  🌾 Wheat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('paddy')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 rounded-lg border border-emerald-700/60 transition"
+                >
+                  🍚 Paddy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('tomato')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 rounded-lg border border-emerald-700/60 transition"
+                >
+                  🍅 Tomato
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
-              <div className="bg-emerald-950 p-4 rounded-2xl border border-emerald-800">
-                <span className="text-xs text-slate-400 font-semibold block">Total Expected Revenue</span>
-                <span className="text-xl font-extrabold text-white">₹{totalRevenue.toLocaleString()}</span>
+            {/* Direct Numerical Input Panel */}
+            <div className="bg-emerald-950/90 rounded-2xl border border-emerald-700/60 p-4 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-emerald-800/70 pb-2">
+                <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center space-x-1.5">
+                  <span>1. Land & Yield Details</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Direct numerical entry</span>
               </div>
-              <div className="bg-emerald-950 p-4 rounded-2xl border border-emerald-800">
-                <span className="text-xs text-slate-400 font-semibold block">Total Estimated Expenses</span>
-                <span className="text-xl font-extrabold text-rose-400">₹{totalExpenses.toLocaleString()}</span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Land Area */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">Farm Land Area</label>
+                  <div className="flex rounded-xl overflow-hidden border border-emerald-700/70 bg-emerald-900/70 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400">
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="any"
+                      value={calcArea || ''}
+                      onChange={(e) => setCalcArea(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 5"
+                      className="w-full bg-transparent px-3 py-2 text-sm font-bold text-white outline-none"
+                    />
+                    <select
+                      value={calcAreaUnit}
+                      onChange={(e) => setCalcAreaUnit(e.target.value)}
+                      className="bg-emerald-950 px-2 py-2 text-xs font-semibold text-amber-300 border-l border-emerald-700/70 outline-none cursor-pointer"
+                    >
+                      <option value="Acres">Acres</option>
+                      <option value="Bigha">Bigha</option>
+                      <option value="Hectares">Hectares</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* 2. Expected Yield */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">Expected Yield / {calcAreaUnit.slice(0, -1)}</label>
+                  <div className="flex rounded-xl overflow-hidden border border-emerald-700/70 bg-emerald-900/70 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400">
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="any"
+                      value={calcYield || ''}
+                      onChange={(e) => setCalcYield(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 20"
+                      className="w-full bg-transparent px-3 py-2 text-sm font-bold text-white outline-none"
+                    />
+                    <select
+                      value={calcYieldUnit}
+                      onChange={(e) => setCalcYieldUnit(e.target.value)}
+                      className="bg-emerald-950 px-2 py-2 text-xs font-semibold text-amber-300 border-l border-emerald-700/70 outline-none cursor-pointer"
+                    >
+                      <option value="Quintals">Quintals</option>
+                      <option value="Kg">Kg</option>
+                      <option value="Bags (50kg)">Bags (50kg)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* 3. Mandi Selling Rate */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">Mandi Selling Price</label>
+                  <div className="flex rounded-xl overflow-hidden border border-emerald-700/70 bg-emerald-900/70 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400">
+                    <div className="flex items-center pl-2.5 text-xs text-slate-400 font-bold">₹</div>
+                    <input
+                      type="number"
+                      min="1"
+                      step="any"
+                      value={calcPrice || ''}
+                      onChange={(e) => setCalcPrice(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 2400"
+                      className="w-full bg-transparent px-2 py-2 text-sm font-bold text-white outline-none"
+                    />
+                    <select
+                      value={calcPriceUnit}
+                      onChange={(e) => setCalcPriceUnit(e.target.value)}
+                      className="bg-emerald-950 px-2 py-2 text-xs font-semibold text-amber-300 border-l border-emerald-700/70 outline-none cursor-pointer"
+                    >
+                      <option value="₹ / Quintal">/ Quintal</option>
+                      <option value="₹ / Kg">/ Kg</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-              <div className="bg-emerald-900/90 p-4 rounded-2xl border border-emerald-500/50">
-                <span className="text-xs text-amber-300 font-bold block">Estimated Net Profit</span>
-                <span className="text-2xl font-black text-[#82c419]">₹{netProfit.toLocaleString()}</span>
+
+              {/* Expense Breakdown Header with Scope Toggle */}
+              <div className="flex items-center justify-between border-b border-emerald-800/70 pt-2 pb-2">
+                <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                  2. Itemized Cost & Expenses
+                </span>
+                <div className="flex items-center space-x-1 bg-emerald-900/80 p-0.5 rounded-lg border border-emerald-700/60 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setCalcCostScope('per-unit')}
+                    className={`px-2 py-0.5 rounded-md font-bold transition ${calcCostScope === 'per-unit' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'}`}
+                  >
+                    ₹ / {calcAreaUnit.slice(0, -1)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalcCostScope('total')}
+                    className={`px-2 py-0.5 rounded-md font-bold transition ${calcCostScope === 'total' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'}`}
+                  >
+                    Total ₹
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Labour Cost */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                    <span>Labour Cost</span>
+                    <span className="text-[10px] text-amber-300 font-semibold">{calcCostScope === 'per-unit' ? `₹ / ${calcAreaUnit.slice(0, -1)}` : 'Total ₹'}</span>
+                  </label>
+                  <div className="flex rounded-xl overflow-hidden border border-emerald-700/70 bg-emerald-900/70 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400">
+                    <div className="flex items-center pl-2.5 text-xs text-slate-400 font-bold">₹</div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={calcLabourCost || ''}
+                      onChange={(e) => setCalcLabourCost(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 5000"
+                      className="w-full bg-transparent px-2 py-2 text-sm font-bold text-white outline-none"
+                    />
+                    <span className="bg-emerald-950/80 px-2.5 py-2 text-xs font-semibold text-slate-400 border-l border-emerald-700/70 flex items-center">
+                      {calcCostScope === 'per-unit' ? `/${calcAreaUnit.slice(0, -1)}` : 'Tot'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Material Cost */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                    <span>Material (Seeds/Fert.)</span>
+                    <span className="text-[10px] text-amber-300 font-semibold">{calcCostScope === 'per-unit' ? `₹ / ${calcAreaUnit.slice(0, -1)}` : 'Total ₹'}</span>
+                  </label>
+                  <div className="flex rounded-xl overflow-hidden border border-emerald-700/70 bg-emerald-900/70 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400">
+                    <div className="flex items-center pl-2.5 text-xs text-slate-400 font-bold">₹</div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={calcMaterialCost || ''}
+                      onChange={(e) => setCalcMaterialCost(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 3000"
+                      className="w-full bg-transparent px-2 py-2 text-sm font-bold text-white outline-none"
+                    />
+                    <span className="bg-emerald-950/80 px-2.5 py-2 text-xs font-semibold text-slate-400 border-l border-emerald-700/70 flex items-center">
+                      {calcCostScope === 'per-unit' ? `/${calcAreaUnit.slice(0, -1)}` : 'Tot'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Other Expenses */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                    <span>Other Expenses (Diesel/Irr.)</span>
+                    <span className="text-[10px] text-amber-300 font-semibold">{calcCostScope === 'per-unit' ? `₹ / ${calcAreaUnit.slice(0, -1)}` : 'Total ₹'}</span>
+                  </label>
+                  <div className="flex rounded-xl overflow-hidden border border-emerald-700/70 bg-emerald-900/70 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400">
+                    <div className="flex items-center pl-2.5 text-xs text-slate-400 font-bold">₹</div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={calcOtherCost || ''}
+                      onChange={(e) => setCalcOtherCost(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 1500"
+                      className="w-full bg-transparent px-2 py-2 text-sm font-bold text-white outline-none"
+                    />
+                    <span className="bg-emerald-950/80 px-2.5 py-2 text-xs font-semibold text-slate-400 border-l border-emerald-700/70 flex items-center">
+                      {calcCostScope === 'per-unit' ? `/${calcAreaUnit.slice(0, -1)}` : 'Tot'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Financial Statement & Results */}
+            <div className="space-y-3">
+              {/* Financial Progress Bar */}
+              <div className="bg-emerald-950/80 rounded-2xl border border-emerald-800/60 p-3.5 space-y-2">
+                <div className="flex justify-between text-xs font-bold">
+                  <span className="text-slate-300">Revenue vs Expense Ratio</span>
+                  <span className={isProfitable ? 'text-[#82c419]' : 'text-rose-400'}>
+                    {isProfitable ? `✓ Profit Margin: ${Math.max(0, 100 - revenueShare)}%` : `⚠ Expense Exceeds Revenue`}
+                  </span>
+                </div>
+                <div className="w-full h-3.5 bg-emerald-900/60 rounded-full overflow-hidden flex">
+                  <div className="h-full bg-rose-500 transition-all duration-300" style={{ width: `${revenueShare}%` }} />
+                  <div className="h-full bg-[#82c419] transition-all duration-300" style={{ width: `${Math.max(0, 100 - revenueShare)}%` }} />
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span className="text-rose-400 font-semibold">Total Cost: ₹{totalExpenses.toLocaleString('en-IN')} ({revenueShare}%)</span>
+                  <span className="text-[#82c419] font-semibold">Net Profit: ₹{Math.max(0, netProfit).toLocaleString('en-IN')} ({Math.max(0, 100 - revenueShare)}%)</span>
+                </div>
+              </div>
+
+              {/* 4-Card Primary Financial Ledger */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {/* Gross Revenue */}
+                <div className="bg-emerald-950/90 p-3.5 rounded-2xl border border-emerald-800/70 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Gross Revenue</span>
+                  <span className="text-lg font-black text-white block">₹{totalRevenue.toLocaleString('en-IN')}</span>
+                  <span className="text-[10px] text-emerald-400 font-medium">
+                    {totalProductionQtl.toFixed(1)} Qtl total harvest
+                  </span>
+                </div>
+
+                {/* Total Cost */}
+                <div className="bg-emerald-950/90 p-3.5 rounded-2xl border border-emerald-800/70 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Total Expenses</span>
+                  <span className="text-lg font-black text-rose-400 block">₹{totalExpenses.toLocaleString('en-IN')}</span>
+                  <span className="text-[10px] text-rose-300/80 font-medium">
+                    ₹{costPerLandUnit.toLocaleString('en-IN')} / {calcAreaUnit.slice(0, -1)}
+                  </span>
+                </div>
+
+                {/* Net Profit / Loss */}
+                <div className={`p-3.5 rounded-2xl border space-y-1 ${isProfitable ? 'bg-[#82c419]/15 border-[#82c419]/50' : 'bg-rose-950/80 border-rose-600/60'}`}>
+                  <span className={`text-[10px] font-black uppercase block tracking-wider ${isProfitable ? 'text-[#82c419]' : 'text-rose-400'}`}>
+                    {isProfitable ? '★ Net Profit' : '⚠ Net Loss'}
+                  </span>
+                  <span className={`text-xl font-black block ${isProfitable ? 'text-[#82c419]' : 'text-rose-400'}`}>
+                    ₹{Math.abs(netProfit).toLocaleString('en-IN')}
+                  </span>
+                  <span className={`text-[10px] font-bold ${isProfitable ? 'text-[#82c419]/90' : 'text-rose-300'}`}>
+                    ₹{Math.abs(profitPerLandUnit).toLocaleString('en-IN')} / {calcAreaUnit.slice(0, -1)}
+                  </span>
+                </div>
+
+                {/* ROI % */}
+                <div className="bg-emerald-950/90 p-3.5 rounded-2xl border border-emerald-800/70 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Return on Invest (ROI)</span>
+                  <span className={`text-lg font-black block ${roi >= 0 ? 'text-amber-300' : 'text-rose-400'}`}>
+                    {roi.toFixed(1)}%
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    {roi >= 100 ? 'High return crop' : roi >= 30 ? 'Healthy return' : roi > 0 ? 'Modest return' : 'Loss trajectory'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Break-even & Actionable Intelligence */}
+              <div className="bg-emerald-950/70 rounded-2xl border border-emerald-800/50 p-3.5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="flex items-center space-x-2.5">
+                  <span className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 flex items-center justify-center font-bold text-sm shrink-0">
+                    ⚖️
+                  </span>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Break-even Selling Price</span>
+                    <span className="text-sm font-black text-white">₹{breakEvenPrice.toLocaleString('en-IN')} / Quintal</span>
+                    <span className="text-[10px] text-slate-400 block">Minimum price to avoid loss</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2.5">
+                  <span className="w-8 h-8 rounded-xl bg-emerald-400/20 text-emerald-300 flex items-center justify-center font-bold text-sm shrink-0">
+                    📦
+                  </span>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Break-even Yield Required</span>
+                    <span className="text-sm font-black text-white">{breakEvenYield.toFixed(1)} Quintals / {calcAreaUnit.slice(0, -1)}</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      {yieldInQtlPerUnit >= breakEvenYield ? `✓ ${(yieldInQtlPerUnit - breakEvenYield).toFixed(1)} Qtl profit safety margin` : `⚠ ${(breakEvenYield - yieldInQtlPerUnit).toFixed(1)} Qtl under target`}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         );
+      }
 
       case 'government-schemes':
         return (
@@ -1067,61 +1369,143 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
               {/* Render Specialized Interactive Tool if available */}
               {renderInteractiveTool()}
 
-              {service.fullDetails?.features && (
-                <div>
-                  <h4 className="text-sm font-semibold text-amber-300 uppercase tracking-wider mb-3">
-                    Key Features & Coverage
-                  </h4>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-200">
-                    {service.fullDetails.features.map((feat, idx) => (
-                      <li key={idx} className="flex items-center space-x-2 bg-emerald-950/60 p-2.5 rounded-xl border border-emerald-800/40">
-                        <CheckCircle2 className="w-4 h-4 text-[#82c419] shrink-0" />
-                        <span>{feat}</span>
-                      </li>
-                    ))}
-                  </ul>
+              {/* Coming Soon Professional Notice & Pre-Registration */}
+              {service.isComingSoon ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-amber-950/40 rounded-2xl border border-amber-500/40 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center space-x-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                        <span>Program Rollout • Launching Soon</span>
+                      </span>
+                      <span className="text-[11px] font-bold bg-amber-400/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-400/30">
+                        Q3 2026 Phase-1
+                      </span>
+                    </div>
+                    <h5 className="text-sm font-bold text-white">
+                      Field Preparations & Regional Lab Onboarding Underway
+                    </h5>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {service.id === 'soil-fertilization'
+                        ? 'Our regional soil testing laboratories, rapid diagnostic kits, and agronomist sample collection routes are currently undergoing final calibration across rural hubs.'
+                        : 'Our veterinary doctor network, mobile livestock diagnostic equipment, and tailored cattle feed formulation charts are currently in final deployment stages.'}
+                    </p>
+                  </div>
+
+                  {/* Planned Key Deliverables */}
+                  {service.fullDetails?.features && (
+                    <div>
+                      <h4 className="text-xs font-bold text-emerald-300 uppercase tracking-wider mb-2.5">
+                        Planned Program Deliverables
+                      </h4>
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-200">
+                        {service.fullDetails.features.map((feat, idx) => (
+                          <li key={idx} className="flex items-center space-x-2 bg-emerald-950/60 p-2.5 rounded-xl border border-emerald-800/40">
+                            <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>{feat}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Pre-Registration Form */}
+                  <form onSubmit={handleBook} className="pt-3 border-t border-emerald-800/60 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-white flex items-center space-x-2">
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>Pre-Register for Early Access</span>
+                      </h4>
+                      <span className="text-[10px] text-amber-300 font-bold bg-amber-400/15 px-2 py-0.5 rounded-full">
+                        Priority Regional Queue
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Farmer / Dairy Name"
+                        className="w-full bg-emerald-950/80 border border-emerald-700/60 rounded-xl px-3 py-2 text-xs text-white placeholder-emerald-400/60 focus:outline-none focus:border-amber-400"
+                      />
+                      <input
+                        type="tel"
+                        required
+                        placeholder="Mobile Number for Launch SMS"
+                        className="w-full bg-emerald-950/80 border border-emerald-700/60 rounded-xl px-3 py-2 text-xs text-white placeholder-emerald-400/60 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded-xl shadow-lg flex items-center justify-center space-x-2 text-xs transition"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Join Priority Pre-Registration List</span>
+                    </button>
+                  </form>
                 </div>
+              ) : (
+                <>
+                  {service.fullDetails?.features && service.id !== 'mandi-price' && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-amber-300 uppercase tracking-wider mb-3">
+                        Key Features & Coverage
+                      </h4>
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-200">
+                        {service.fullDetails.features.map((feat, idx) => (
+                          <li key={idx} className="flex items-center space-x-2 bg-emerald-950/60 p-2.5 rounded-xl border border-emerald-800/40">
+                            <CheckCircle2 className="w-4 h-4 text-[#82c419] shrink-0" />
+                            <span>{feat}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Consultation / Assessment Form */}
+                  {service.id !== 'mandi-price' && (
+                  <form onSubmit={handleBook} className="pt-4 border-t border-emerald-800/60 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-base font-bold text-white flex items-center space-x-2">
+                        <Calendar className="w-5 h-5 text-amber-300" />
+                        <span>Request Expert Advisory</span>
+                      </h4>
+                      <span className="text-xs text-amber-300 font-bold bg-amber-400/20 px-3 py-1 rounded-full border border-amber-400/30">
+                        {service.fullDetails?.pricing || 'Free Tool'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Your Name / Farm Name"
+                        className="w-full bg-emerald-950/80 border border-emerald-700/60 rounded-xl px-4 py-2.5 text-sm text-white placeholder-emerald-400/60 focus:outline-none focus:border-amber-400"
+                      />
+                      <select
+                        value={farmSize}
+                        onChange={(e) => setFarmSize(e.target.value)}
+                        className="w-full bg-emerald-950/80 border border-emerald-700/60 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                      >
+                        <option value="1-10 acres">1 - 10 Acres</option>
+                        <option value="10-50 acres">10 - 50 Acres</option>
+                        <option value="50-200 acres">50 - 200 Acres</option>
+                        <option value="200+ acres">200+ Commercial Acres</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-3 bg-[#168038] hover:bg-[#136e30] text-white font-bold rounded-xl shadow-lg flex items-center justify-center space-x-2 transition"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span>Submit Request</span>
+                    </button>
+                  </form>
+                  )}
+                </>
               )}
-
-              {/* Consultation / Assessment Form */}
-              <form onSubmit={handleBook} className="pt-4 border-t border-emerald-800/60 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-base font-bold text-white flex items-center space-x-2">
-                    <Calendar className="w-5 h-5 text-amber-300" />
-                    <span>Request Expert Advisory</span>
-                  </h4>
-                  <span className="text-xs text-amber-300 font-bold bg-amber-400/20 px-3 py-1 rounded-full border border-amber-400/30">
-                    {service.fullDetails?.pricing || 'Free Tool'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Your Name / Farm Name"
-                    className="w-full bg-emerald-950/80 border border-emerald-700/60 rounded-xl px-4 py-2.5 text-sm text-white placeholder-emerald-400/60 focus:outline-none focus:border-amber-400"
-                  />
-                  <select
-                    value={farmSize}
-                    onChange={(e) => setFarmSize(e.target.value)}
-                    className="w-full bg-emerald-950/80 border border-emerald-700/60 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
-                  >
-                    <option value="1-10 acres">1 - 10 Acres</option>
-                    <option value="10-50 acres">10 - 50 Acres</option>
-                    <option value="50-200 acres">50 - 200 Acres</option>
-                    <option value="200+ acres">200+ Commercial Acres</option>
-                  </select>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full py-3 bg-[#168038] hover:bg-[#136e30] text-white font-bold rounded-xl shadow-lg flex items-center justify-center space-x-2 transition"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>Submit Request</span>
-                </button>
-              </form>
             </>
           )}
         </div>

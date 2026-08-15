@@ -114,24 +114,38 @@ export const SERVICES_DATA: ServiceItem[] = [
     id: 'soil-fertilization',
     tag: 'Soil Enhancement',
     title: 'Soil Fertilization & Bio-Testing',
-    description: 'Comprehensive soil testing and enhancement strategies for rich organic plant growth.',
+    description: 'Comprehensive laboratory soil testing, microbial culture analysis, and organic fertilization plans. Coming soon to your regional district.',
     image: IMAGES.soilTesting,
+    isComingSoon: true,
+    statusBadge: 'Coming Soon',
     fullDetails: {
-      overview: 'Transform poor soil into rich, microbial-active humus. We provide natural compost blends, mycorrhizal inoculants, and mineral balances for peak roots.',
-      features: ['Full Spectrum NPK & Micronutrient Analysis', 'Custom Compost Formulations', 'Bio-char & Worm Casting Treatment', 'Moisture Retention Boost'],
-      pricing: '$25 / acre'
+      overview: 'Our field agronomists and soil microbiologists are establishing regional soil diagnostic facilities to provide certified NPK, organic carbon, and microbial health reports with custom soil regeneration plans.',
+      features: [
+        'Full-Spectrum NPK & Micronutrient Testing',
+        'Bio-Compost & Microbial Inoculation Recipes',
+        'Soil Salinity & pH Balance Correction',
+        'On-Farm Doorstep Sample Collection'
+      ],
+      pricing: 'Coming Soon • Pre-Registration Open'
     }
   },
   {
     id: 'dairy-production',
     tag: 'Animal Husbandry',
     title: 'Dairy & Livestock Health',
-    description: 'Pasture-fed animal care, milk production optimization, and veterinary consultation.',
+    description: 'Pasture-fed herd management protocols, veterinary advisory, and milk yield optimization services. Service rollout starting soon.',
     image: IMAGES.dairyFarm,
+    isComingSoon: true,
+    statusBadge: 'Coming Soon',
     fullDetails: {
-      overview: 'Ethically raised pasture-fed dairy herds produce rich A2 organic milk, raw artisanal butter, and grass-fed yogurts shipped cold to homes and stores daily.',
-      features: ['100% Grass-Fed & Pasture-Raised Cows', 'Hormone & Antibiotic-Free Guarantee', 'Cold-Chain Express Delivery', 'Glass Bottle Return Program'],
-      pricing: 'Subscription from $35 / week'
+      overview: 'Specialized dairy cattle care, balanced green-fodder nutrition programs, and certified veterinary consultations designed to maximize herd health and clean milk production.',
+      features: [
+        'Certified On-Field Veterinary Consultations',
+        'Customized Cattle Nutrition & Silage Plans',
+        'Lactation & Milk Fat Percentage Optimization',
+        'Preventive Herd Vaccination & Health Schedules'
+      ],
+      pricing: 'Coming Soon • Early Access Available'
     }
   }
 ];

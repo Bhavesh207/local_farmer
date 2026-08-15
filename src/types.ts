@@ -6,6 +6,8 @@ export interface ServiceItem {
   title: string;
   description: string;
   image: string;
+  isComingSoon?: boolean;
+  statusBadge?: string;
   fullDetails?: {
     overview: string;
     features: string[];
